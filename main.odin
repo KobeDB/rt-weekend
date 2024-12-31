@@ -95,12 +95,9 @@ ray_at :: proc(ray: Ray, t: f32) -> [3]f32 {
 }
 
 ray_color :: proc(ray: Ray, hittables: []Hittable) -> [3]f32 {
-
-    for hittable in hittables {
-        is_hit, hit_info := hit(hittable, ray, 0.1, 10)
-        if is_hit {
-            return 0.5 * (hit_info.normal + {1,1,1})
-        }
+    is_hit, hit_info := hit_hittables(hittables, ray, 0.1, 10)
+    if is_hit {
+        return 0.5 * (hit_info.normal + {1,1,1})
     }
 
     unit_dir := linalg.normalize(ray.dir)
@@ -111,7 +108,23 @@ ray_color :: proc(ray: Ray, hittables: []Hittable) -> [3]f32 {
 Hit_Info :: struct {
     p: [3]f32,
     normal: [3]f32,
+    front_face: bool,
     t: f32,
+}
+
+hit_hittables :: proc(hittables: []Hittable, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (bool, Hit_Info) {
+    closest_t := max(f32)
+    best_hit_info : Hit_Info
+    best_is_hit : bool
+    for hittable in hittables {
+        is_hit, hit_info := hit(hittable, ray, ray_tmin, ray_tmax)
+        if is_hit && hit_info.t < closest_t {
+            closest_t = hit_info.t
+            best_hit_info = hit_info
+            best_is_hit = true
+        }
+    }
+    return best_is_hit, best_hit_info
 }
 
 hit :: proc(hittable: Hittable, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (bool, Hit_Info) {
@@ -154,7 +167,12 @@ hit_sphere :: proc(sphere: Sphere, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (b
     hi : Hit_Info
     hi.t = root
     hi.p = ray_at(ray, hi.t)
-    hi.normal = linalg.normalize(hi.p - sphere.center)
+    set_face_normal(&hi, ray, outward_normal=linalg.normalize(hi.p - sphere.center))
 
     return true, hi
+}
+
+set_face_normal :: proc(hi: ^Hit_Info, ray: Ray, outward_normal: [3]f32) {
+    hi.front_face = (linalg.dot(ray.dir, outward_normal) < 0)
+    hi.normal = outward_normal if hi.front_face else -outward_normal
 }
