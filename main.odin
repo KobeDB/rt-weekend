@@ -97,8 +97,10 @@ ray_at :: proc(ray: Ray, t: f32) -> [3]f32 {
 ray_color :: proc(ray: Ray, hittables: []Hittable) -> [3]f32 {
 
     for hittable in hittables {
-        is_hit, hit_info := hit(hittable, ray)
-        return 0.5 * (hit_info.normal + {1,1,1})
+        is_hit, hit_info := hit(hittable, ray, 0.1, 10)
+        if is_hit {
+            return 0.5 * (hit_info.normal + {1,1,1})
+        }
     }
 
     unit_dir := linalg.normalize(ray.dir)
@@ -112,11 +114,11 @@ Hit_Info :: struct {
     t: f32,
 }
 
-hit :: proc(hittable: Hittable, ray: Ray) -> (bool, Hit_Info) {
+hit :: proc(hittable: Hittable, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (bool, Hit_Info) {
     switch h in hittable {
         case Sphere: {
             fmt.println("Checking hits on a sphere")
-            return hit_sphere(h, ray)
+            return hit_sphere(h, ray, ray_tmin, ray_tmax)
         }
         case: { return {}, {}}
     }
@@ -131,18 +133,28 @@ Sphere :: struct {
     radius: f32,
 }
 
-hit_sphere :: proc(sphere: Sphere, ray: Ray) -> (is_hit: bool, hi: Hit_Info) {
+hit_sphere :: proc(sphere: Sphere, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (bool, Hit_Info) {
     a := linalg.dot(ray.dir, ray.dir)
     b := linalg.dot(-2*ray.dir, sphere.center - ray.origin)
     c := linalg.dot(sphere.center - ray.origin, sphere.center - ray.origin) - sphere.radius * sphere.radius
     discriminant := b*b - 4*a*c
 
-    is_hit = discriminant >= 0
-    if is_hit {
-        hi.t = (-b - math.sqrt(discriminant)) / (2*a)
-        hi.p = ray_at(ray, hi.t)
-        hi.normal = linalg.normalize(hi.p - sphere.center)
+    if discriminant < 0 {
+        return false, {}
     }
 
-    return
+    root := (-b - math.sqrt(discriminant)) / (2*a)
+    if root <= ray_tmin || root >= ray_tmax {
+        root = (-b + math.sqrt(discriminant)) / (2*a)
+        if root <= ray_tmin || root >= ray_tmax {
+            return false, {}
+        }
+    }
+
+    hi : Hit_Info
+    hi.t = root
+    hi.p = ray_at(ray, hi.t)
+    hi.normal = linalg.normalize(hi.p - sphere.center)
+
+    return true, hi
 }
