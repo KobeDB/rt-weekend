@@ -46,6 +46,7 @@ main :: proc() {
 
     hittables : [dynamic]Hittable
     append(&hittables, Sphere{sphere_center, sphere_radius})
+    append(&hittables, Sphere{center={0,-100.5,-1}, radius=100})
 
     // Rendering
     // --------------
@@ -95,7 +96,7 @@ ray_at :: proc(ray: Ray, t: f32) -> [3]f32 {
 }
 
 ray_color :: proc(ray: Ray, hittables: []Hittable) -> [3]f32 {
-    is_hit, hit_info := hit_hittables(hittables, ray, 0.1, 10)
+    is_hit, hit_info := hit_hittables(hittables, ray, interval={0, max(f32)})
     if is_hit {
         return 0.5 * (hit_info.normal + {1,1,1})
     }
@@ -112,26 +113,45 @@ Hit_Info :: struct {
     t: f32,
 }
 
-hit_hittables :: proc(hittables: []Hittable, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (bool, Hit_Info) {
-    closest_t := max(f32)
-    best_hit_info : Hit_Info
-    best_is_hit : bool
-    for hittable in hittables {
-        is_hit, hit_info := hit(hittable, ray, ray_tmin, ray_tmax)
-        if is_hit && hit_info.t < closest_t {
-            closest_t = hit_info.t
-            best_hit_info = hit_info
-            best_is_hit = true
-        }
-    }
-    return best_is_hit, best_hit_info
+// first element is min, second element is max
+Interval :: distinct [2]f32
+
+empty_interval :: proc() -> Interval {
+    return {max(f32), min(f32)}
 }
 
-hit :: proc(hittable: Hittable, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (bool, Hit_Info) {
+universe_interval :: proc() -> Interval {
+    return {min(f32), max(f32)}
+}
+
+in_interval_exclusive :: proc(value: f32, interval: Interval) -> bool {
+    return interval[0] < value && value < interval[1]
+}
+
+in_interval_inclusive :: proc(value: f32, interval: Interval) -> bool {
+    return interval[0] <= value && value <= interval[1]
+}
+
+hit_hittables :: proc(hittables: []Hittable, ray: Ray, interval: Interval) -> (bool, Hit_Info) {
+    closest_t := interval[1]
+    result_hit_info : Hit_Info
+    hit_anything : bool
+    for hittable in hittables {
+        is_hit, hit_info := hit(hittable, ray, {interval[0],closest_t})
+        if is_hit && hit_info.t < closest_t {
+            closest_t = hit_info.t
+            result_hit_info = hit_info
+            hit_anything = true
+        }
+    }
+    return hit_anything, result_hit_info
+}
+
+hit :: proc(hittable: Hittable, ray: Ray, interval: Interval) -> (bool, Hit_Info) {
     switch h in hittable {
         case Sphere: {
             fmt.println("Checking hits on a sphere")
-            return hit_sphere(h, ray, ray_tmin, ray_tmax)
+            return hit_sphere(h, ray, interval)
         }
         case: { return {}, {}}
     }
@@ -146,7 +166,7 @@ Sphere :: struct {
     radius: f32,
 }
 
-hit_sphere :: proc(sphere: Sphere, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (bool, Hit_Info) {
+hit_sphere :: proc(sphere: Sphere, ray: Ray, interval: Interval) -> (bool, Hit_Info) {
     a := linalg.dot(ray.dir, ray.dir)
     b := linalg.dot(-2*ray.dir, sphere.center - ray.origin)
     c := linalg.dot(sphere.center - ray.origin, sphere.center - ray.origin) - sphere.radius * sphere.radius
@@ -157,9 +177,9 @@ hit_sphere :: proc(sphere: Sphere, ray: Ray, ray_tmin: f32, ray_tmax: f32) -> (b
     }
 
     root := (-b - math.sqrt(discriminant)) / (2*a)
-    if root <= ray_tmin || root >= ray_tmax {
+    if !in_interval_exclusive(root, interval) {
         root = (-b + math.sqrt(discriminant)) / (2*a)
-        if root <= ray_tmin || root >= ray_tmax {
+        if !in_interval_exclusive(root, interval) {
             return false, {}
         }
     }
