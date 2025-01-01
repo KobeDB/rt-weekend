@@ -12,32 +12,9 @@ main :: proc() {
 
     context.logger = log.create_console_logger()
 
-    // Image
-    // --------------
-    image_dims := [2]int{160, 90}
-
-    aspect_ratio := f32(image_dims.x) / f32(image_dims.y)
-
     // Camera
-    // --------------
-    viewport_dims : [2]f32
-    viewport_dims.y = 2
-    viewport_dims.x = viewport_dims.y * aspect_ratio
-
-    focal_length := f32(1)
-
-    camera_center := [3]f32{0,0,0}
-
-    // Viewport vectors
-    // -------------------
-    viewport_u := [3]f32{viewport_dims.x,0,0}
-    viewport_v := [3]f32{0,-viewport_dims.y,0}
-
-    pixel_delta_u := viewport_u / f32(image_dims.x)
-    pixel_delta_v := viewport_v / f32(image_dims.y)
-
-    viewport_upper_left := camera_center - [3]f32{0,0,focal_length} - viewport_u/2 - viewport_v/2
-    pixel00_loc := viewport_upper_left + pixel_delta_u/2 + pixel_delta_v/2
+    camera: Camera
+    camera_initialize(&camera, [2]int{160, 90})
 
     // Scene
     // --------------
@@ -50,6 +27,27 @@ main :: proc() {
 
     // Rendering
     // --------------
+    camera_render(camera, hittables[:])
+}
+
+write_color :: proc(color: [3]f32, image_data: ^strings.Builder) {
+    ir := int(255.99 * color.r)
+    ig := int(255.99 * color.g)
+    ib := int(255.99 * color.b)
+
+    fmt.sbprintfln(image_data, "%d %d %d", ir, ig, ib)
+}
+
+Camera :: struct {
+    image_dims: [2]int,
+    aspect_ratio: f32,
+    center: [3]f32,
+    pixel00_loc: [3]f32,
+    pixel_delta_u: [3]f32,
+    pixel_delta_v: [3]f32,
+}
+
+camera_render :: proc(using camera: Camera, world: Hittable) {
     image_data : strings.Builder
 
     fmt.sbprintfln(&image_data, "P3\n%d %d\n%d", image_dims.x, image_dims.y, 255)
@@ -58,10 +56,10 @@ main :: proc() {
         log.info("Processing scan line:", y, "(total amount of scanlines", image_dims.y, ")")
         for x in 0..<image_dims.x {
             ray : Ray
-            ray.origin = camera_center
+            ray.origin = camera.center
             ray.dir = pixel00_loc + pixel_delta_u * f32(x) + pixel_delta_v * f32(y)
 
-            pixel_color := ray_color(ray, hittables[:])
+            pixel_color := ray_color(ray, world)
 
             write_color(pixel_color, &image_data)
         }
@@ -75,15 +73,35 @@ main :: proc() {
     if !write_ok {
         fmt.eprintln("Failed to write image data to a file")
     }
-
 }
 
-write_color :: proc(color: [3]f32, image_data: ^strings.Builder) {
-    ir := int(255.99 * color.r)
-    ig := int(255.99 * color.g)
-    ib := int(255.99 * color.b)
+camera_initialize :: proc(camera: ^Camera, image_dims: [2]int) {
+    // Image
+    // --------------
+    camera.image_dims = image_dims
 
-    fmt.sbprintfln(image_data, "%d %d %d", ir, ig, ib)
+    camera.aspect_ratio = f32(camera.image_dims.x) / f32(camera.image_dims.y)
+
+    // Camera
+    // --------------
+    viewport_dims : [2]f32
+    viewport_dims.y = 2
+    viewport_dims.x = viewport_dims.y * camera.aspect_ratio
+
+    focal_length := f32(1)
+
+    camera.center = [3]f32{0,0,0}
+
+    // Viewport vectors
+    // -------------------
+    viewport_u := [3]f32{viewport_dims.x,0,0}
+    viewport_v := [3]f32{0,-viewport_dims.y,0}
+
+    camera.pixel_delta_u = viewport_u / f32(camera.image_dims.x)
+    camera.pixel_delta_v = viewport_v / f32(camera.image_dims.y)
+
+    viewport_upper_left := camera.center - [3]f32{0,0,focal_length} - viewport_u/2 - viewport_v/2
+    camera.pixel00_loc = viewport_upper_left + camera.pixel_delta_u/2 + camera.pixel_delta_v/2
 }
 
 Ray :: struct {
