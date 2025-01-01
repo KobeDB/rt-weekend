@@ -15,7 +15,7 @@ main :: proc() {
 
     // Camera
     camera: Camera
-    camera_initialize(&camera, [2]int{1280,720})
+    camera_initialize(&camera, [2]int{160,90}*2)
 
     // Scene
     // --------------
@@ -23,8 +23,13 @@ main :: proc() {
     sphere_radius := f32(0.5)
 
     hittables : [dynamic]Hittable
-    append(&hittables, Sphere{sphere_center, sphere_radius})
-    append(&hittables, Sphere{center={0,-100.5,-1}, radius=100})
+    lamb : Material = Lambertian{albedo={0.8,0.5,0.5}}
+    metal_0 : Material = Metal{albedo={0.5,0.5,0.5}}
+    metal_1 : Material = Metal{albedo={0.8,0.6,0.2}}
+    append(&hittables, Sphere{sphere_center + {1,0,0}, sphere_radius, &metal_0})
+    append(&hittables, Sphere{sphere_center + {-1.2,0,0}, sphere_radius, &metal_1})
+    append(&hittables, Sphere{sphere_center,        sphere_radius,  &lamb})
+    append(&hittables, Sphere{center={0,-100.5,-1}, radius=100, material=&lamb})
 
     // Rendering
     // --------------
@@ -145,6 +150,50 @@ camera_initialize :: proc(camera: ^Camera, image_dims: [2]int) {
     camera.pixel00_loc = viewport_upper_left + camera.pixel_delta_u/2 + camera.pixel_delta_v/2
 }
 
+Lambertian :: struct {
+    albedo: [3]f32,
+}
+
+Metal :: struct {
+    albedo: [3]f32,
+}
+
+Material :: union {
+    Lambertian,
+    Metal,
+}
+
+is_vector_near_zero :: proc(v: [3]f32) -> bool {
+    s := f32(1e-8)
+    for c in v {
+        if math.abs(c) >= s {
+            return false
+        }
+    }
+    return true
+}
+
+reflect :: proc(v: [3]f32, n: [3]f32) -> [3]f32 {
+    return v - 2*linalg.dot(v,n)*n
+}
+
+scatter :: proc(material: Material, r_in: Ray, hit_info: Hit_Info) -> (is_scattered: bool, attenuation: [3]f32, scattered: Ray) {
+    switch m in material {
+        case Lambertian: {
+            scatter_dir := hit_info.normal + random_unit_vector()
+            if is_vector_near_zero(scatter_dir) {
+                scatter_dir = hit_info.normal
+            }
+            return true, m.albedo, Ray{hit_info.p, scatter_dir}
+        }
+        case Metal: {
+            scatter_dir := reflect(r_in.dir, hit_info.normal)
+            return true, m.albedo, Ray{hit_info.p, scatter_dir}
+        }
+        case: { return false, {}, {} }
+    }
+}
+
 random_unit_vector :: proc() -> [3]f32 {
     for {
         v : [3]f32
@@ -185,8 +234,12 @@ ray_color :: proc(ray: Ray, depth: int, world: Hittable) -> [3]f32 {
     is_hit, hit_info := hit(world, ray, interval={0.001, max(f32)})
     if is_hit {
         //dir := random_on_hemisphere(hit_info.normal)
-        dir := hit_info.normal + random_unit_vector()
-        return 0.5 * ray_color(Ray{origin=hit_info.p, dir=dir}, depth-1, world)
+        // dir := hit_info.normal + random_unit_vector()
+        is_scattered, attenuation, scattered_ray := scatter(hit_info.material^, ray, hit_info)
+        if !is_scattered {
+            return {0,0,0}
+        }
+        return attenuation * ray_color(scattered_ray, depth-1, world)
     }
 
     unit_dir := linalg.normalize(ray.dir)
@@ -197,6 +250,7 @@ ray_color :: proc(ray: Ray, depth: int, world: Hittable) -> [3]f32 {
 Hit_Info :: struct {
     p: [3]f32,
     normal: [3]f32,
+    material: ^Material,
     front_face: bool,
     t: f32,
 }
@@ -255,6 +309,7 @@ Hittable :: union {
 Sphere :: struct {
     center: [3]f32,
     radius: f32,
+    material: ^Material,
 }
 
 hit_sphere :: proc(sphere: Sphere, ray: Ray, interval: Interval) -> (bool, Hit_Info) {
@@ -278,6 +333,7 @@ hit_sphere :: proc(sphere: Sphere, ray: Ray, interval: Interval) -> (bool, Hit_I
     hi : Hit_Info
     hi.t = root
     hi.p = ray_at(ray, hi.t)
+    hi.material = sphere.material
     set_face_normal(&hi, ray, outward_normal=linalg.normalize(hi.p - sphere.center))
 
     return true, hi
