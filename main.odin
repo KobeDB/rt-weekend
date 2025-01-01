@@ -34,6 +34,15 @@ main :: proc() {
 write_color :: proc(color: [3]f32, image_data: ^strings.Builder) {
     intensity := Interval{0,0.999}
 
+    linear_to_gamma :: proc(component: f32) -> f32 {
+        return math.sqrt(component) if component > 0 else 0
+    }
+
+    color := color
+    for i in 0..<3 {
+        color[i] = linear_to_gamma(color[i])
+    }
+
     clamp_color :: proc(color: f32, interval: Interval) -> f32 {
         return clamp(color, interval[0], interval[1])
     }
@@ -53,6 +62,7 @@ Camera :: struct {
     pixel_delta_u: [3]f32,
     pixel_delta_v: [3]f32,
     samples_per_pixel: int,
+    max_depth: int,
 }
 
 get_ray :: proc(using camera: Camera, x: int, y: int) -> Ray {
@@ -86,7 +96,7 @@ camera_render :: proc(using camera: Camera, world: Hittable) {
             pixel_color : [3]f32
             for _ in 0..<samples_per_pixel {
                 ray := get_ray(camera, x, y)
-                pixel_color += ray_color(ray, world)
+                pixel_color += ray_color(ray, camera.max_depth, world)
             }
 
             write_color(pixel_color / f32(samples_per_pixel), &image_data)
@@ -105,6 +115,7 @@ camera_render :: proc(using camera: Camera, world: Hittable) {
 
 camera_initialize :: proc(camera: ^Camera, image_dims: [2]int) {
     camera.samples_per_pixel = 100
+    camera.max_depth = 10
 
     // Image
     // --------------
@@ -134,6 +145,29 @@ camera_initialize :: proc(camera: ^Camera, image_dims: [2]int) {
     camera.pixel00_loc = viewport_upper_left + camera.pixel_delta_u/2 + camera.pixel_delta_v/2
 }
 
+random_unit_vector :: proc() -> [3]f32 {
+    for {
+        v : [3]f32
+        for i in 0..<3 {
+            v[i] = rand.float32_range(-1,1)
+        }
+        length_squared := linalg.dot(v,v)
+        if 1e-80 < length_squared && length_squared <= 1 {
+            return linalg.normalize(v)
+        }
+    }
+}
+
+random_on_hemisphere :: proc(normal: [3]f32) -> [3]f32 {
+    on_unit_sphere := random_unit_vector()
+    if linalg.dot(on_unit_sphere, normal) > 0 {
+        return on_unit_sphere
+    }
+    else {
+        return -on_unit_sphere
+    }
+}
+
 Ray :: struct {
     origin: [3]f32,
     dir: [3]f32,
@@ -143,10 +177,16 @@ ray_at :: proc(ray: Ray, t: f32) -> [3]f32 {
     return ray.origin + ray.dir * t
 }
 
-ray_color :: proc(ray: Ray, world: Hittable) -> [3]f32 {
-    is_hit, hit_info := hit(world, ray, interval={0, max(f32)})
+ray_color :: proc(ray: Ray, depth: int, world: Hittable) -> [3]f32 {
+    if depth <= 0 {
+        return {0,0,0}
+    }
+
+    is_hit, hit_info := hit(world, ray, interval={0.001, max(f32)})
     if is_hit {
-        return 0.5 * (hit_info.normal + {1,1,1})
+        //dir := random_on_hemisphere(hit_info.normal)
+        dir := hit_info.normal + random_unit_vector()
+        return 0.5 * ray_color(Ray{origin=hit_info.p, dir=dir}, depth-1, world)
     }
 
     unit_dir := linalg.normalize(ray.dir)
