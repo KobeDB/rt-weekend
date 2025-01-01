@@ -6,6 +6,7 @@ import "core:strings"
 import "core:log"
 import "core:math/linalg"
 import "core:math"
+import "core:math/rand"
 
 main :: proc() {
     fmt.println("Hello there")
@@ -14,7 +15,7 @@ main :: proc() {
 
     // Camera
     camera: Camera
-    camera_initialize(&camera, [2]int{160, 90})
+    camera_initialize(&camera, [2]int{1280,720})
 
     // Scene
     // --------------
@@ -31,9 +32,15 @@ main :: proc() {
 }
 
 write_color :: proc(color: [3]f32, image_data: ^strings.Builder) {
-    ir := int(255.99 * color.r)
-    ig := int(255.99 * color.g)
-    ib := int(255.99 * color.b)
+    intensity := Interval{0,0.999}
+
+    clamp_color :: proc(color: f32, interval: Interval) -> f32 {
+        return clamp(color, interval[0], interval[1])
+    }
+
+    ir := int(256 * clamp_color(color.r, intensity))
+    ig := int(256 * clamp_color(color.g, intensity))
+    ib := int(256 * clamp_color(color.b, intensity))
 
     fmt.sbprintfln(image_data, "%d %d %d", ir, ig, ib)
 }
@@ -45,6 +52,25 @@ Camera :: struct {
     pixel00_loc: [3]f32,
     pixel_delta_u: [3]f32,
     pixel_delta_v: [3]f32,
+    samples_per_pixel: int,
+}
+
+get_ray :: proc(using camera: Camera, x: int, y: int) -> Ray {
+    ray : Ray
+    ray.origin = camera.center
+
+    offset := sample_square()
+    pixel_sample := pixel00_loc \
+                        + pixel_delta_u * (f32(x)+offset.x) \
+                        + pixel_delta_v * (f32(y)+offset.y)
+
+    ray.dir = pixel_sample - ray.origin
+
+    return ray
+}
+
+sample_square :: proc() -> [2]f32 {
+    return {rand.float32_range(-0.5,0.5), rand.float32_range(-0.5,0.5)}
 }
 
 camera_render :: proc(using camera: Camera, world: Hittable) {
@@ -55,13 +81,15 @@ camera_render :: proc(using camera: Camera, world: Hittable) {
     for y in 0..<image_dims.y {
         log.info("Processing scan line:", y, "(total amount of scanlines", image_dims.y, ")")
         for x in 0..<image_dims.x {
-            ray : Ray
-            ray.origin = camera.center
-            ray.dir = pixel00_loc + pixel_delta_u * f32(x) + pixel_delta_v * f32(y)
 
-            pixel_color := ray_color(ray, world)
 
-            write_color(pixel_color, &image_data)
+            pixel_color : [3]f32
+            for _ in 0..<samples_per_pixel {
+                ray := get_ray(camera, x, y)
+                pixel_color += ray_color(ray, world)
+            }
+
+            write_color(pixel_color / f32(samples_per_pixel), &image_data)
         }
     }
     log.info("Done rendering")
@@ -76,6 +104,8 @@ camera_render :: proc(using camera: Camera, world: Hittable) {
 }
 
 camera_initialize :: proc(camera: ^Camera, image_dims: [2]int) {
+    camera.samples_per_pixel = 100
+
     // Image
     // --------------
     camera.image_dims = image_dims
@@ -168,7 +198,6 @@ hit_hittables :: proc(hittables: []Hittable, ray: Ray, interval: Interval) -> (b
 hit :: proc(hittable: Hittable, ray: Ray, interval: Interval) -> (bool, Hit_Info) {
     switch h in hittable {
         case Sphere: {
-            fmt.println("Checking hits on a sphere")
             return hit_sphere(h, ray, interval)
         }
         case []Hittable: {
