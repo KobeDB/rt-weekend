@@ -95,8 +95,8 @@ ray_at :: proc(ray: Ray, t: f32) -> [3]f32 {
     return ray.origin + ray.dir * t
 }
 
-ray_color :: proc(ray: Ray, hittables: []Hittable) -> [3]f32 {
-    is_hit, hit_info := hit_hittables(hittables, ray, interval={0, max(f32)})
+ray_color :: proc(ray: Ray, world: Hittable) -> [3]f32 {
+    is_hit, hit_info := hit(world, ray, interval={0, max(f32)})
     if is_hit {
         return 0.5 * (hit_info.normal + {1,1,1})
     }
@@ -153,12 +153,16 @@ hit :: proc(hittable: Hittable, ray: Ray, interval: Interval) -> (bool, Hit_Info
             fmt.println("Checking hits on a sphere")
             return hit_sphere(h, ray, interval)
         }
+        case []Hittable: {
+            return hit_hittables(h, ray, interval)
+        }
         case: { return {}, {}}
     }
 }
 
 Hittable :: union {
     Sphere,
+    []Hittable,
 }
 
 Sphere :: struct {
