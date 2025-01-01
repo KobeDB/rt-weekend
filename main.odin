@@ -24,8 +24,8 @@ main :: proc() {
 
     hittables : [dynamic]Hittable
     lamb : Material = Lambertian{albedo={0.8,0.5,0.5}}
-    metal_0 : Material = Metal{albedo={0.5,0.5,0.5}}
-    metal_1 : Material = Metal{albedo={0.8,0.6,0.2}}
+    metal_0 : Material = Metal{albedo={0.5,0.5,0.5}, fuzz=0.6}
+    metal_1 : Material = Metal{albedo={0.8,0.6,0.2}, fuzz=0.2}
     append(&hittables, Sphere{sphere_center + {1,0,0}, sphere_radius, &metal_0})
     append(&hittables, Sphere{sphere_center + {-1.2,0,0}, sphere_radius, &metal_1})
     append(&hittables, Sphere{sphere_center,        sphere_radius,  &lamb})
@@ -156,6 +156,7 @@ Lambertian :: struct {
 
 Metal :: struct {
     albedo: [3]f32,
+    fuzz: f32,
 }
 
 Material :: union {
@@ -188,7 +189,9 @@ scatter :: proc(material: Material, r_in: Ray, hit_info: Hit_Info) -> (is_scatte
         }
         case Metal: {
             scatter_dir := reflect(r_in.dir, hit_info.normal)
-            return true, m.albedo, Ray{hit_info.p, scatter_dir}
+            scatter_dir = linalg.normalize(scatter_dir) + (m.fuzz * random_unit_vector())
+            _is_scattered := linalg.dot(scatter_dir, hit_info.normal) > 0
+            return _is_scattered, m.albedo, Ray{hit_info.p, scatter_dir}
         }
         case: { return false, {}, {} }
     }
