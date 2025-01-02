@@ -15,7 +15,7 @@ main :: proc() {
 
     // Camera
     camera: Camera
-    camera_initialize(&camera, [2]int{160,90}*2)
+    camera_initialize(&camera, [2]int{160,90}*3)
 
     // Scene
     // --------------
@@ -26,7 +26,10 @@ main :: proc() {
     lamb : Material = Lambertian{albedo={0.8,0.5,0.5}}
     metal_0 : Material = Metal{albedo={0.5,0.5,0.5}, fuzz=0.6}
     metal_1 : Material = Metal{albedo={0.8,0.6,0.2}, fuzz=0.2}
-    append(&hittables, Sphere{sphere_center + {1,0,0}, sphere_radius, &metal_0})
+    glass_0 : Material = Dielectric{1.5}
+    dielectric : Material = Dielectric{1/1.5}
+    append(&hittables, Sphere{sphere_center + {1,0,0}, sphere_radius, &glass_0})
+    append(&hittables, Sphere{sphere_center + {1,0,0}, sphere_radius - 0.1, &dielectric})
     append(&hittables, Sphere{sphere_center + {-1.2,0,0}, sphere_radius, &metal_1})
     append(&hittables, Sphere{sphere_center,        sphere_radius,  &lamb})
     append(&hittables, Sphere{center={0,-100.5,-1}, radius=100, material=&lamb})
@@ -159,9 +162,14 @@ Metal :: struct {
     fuzz: f32,
 }
 
+Dielectric :: struct {
+    refraction_index: f32,
+}
+
 Material :: union {
     Lambertian,
     Metal,
+    Dielectric,
 }
 
 is_vector_near_zero :: proc(v: [3]f32) -> bool {
@@ -178,6 +186,20 @@ reflect :: proc(v: [3]f32, n: [3]f32) -> [3]f32 {
     return v - 2*linalg.dot(v,n)*n
 }
 
+refract :: proc(v: [3]f32, n: [3]f32, eta_i_over_eta_t: f32) -> [3]f32 {
+    cos_theta := linalg.dot(-v,n) / (linalg.length(v)*linalg.length(n))
+    orth_comp := eta_i_over_eta_t * (v + cos_theta * n)
+    orth_len := linalg.length(orth_comp)
+    parallel_comp := -math.sqrt(1-orth_len*orth_len)*n
+    return orth_comp + parallel_comp
+}
+
+reflectance :: proc(cos: f32, refraction_index: f32) -> f32 {
+    r0 := (1-refraction_index) / (1+refraction_index)
+    r0 = r0 * r0
+    return r0 + (1-r0)*math.pow((1-cos),5)
+}
+
 scatter :: proc(material: Material, r_in: Ray, hit_info: Hit_Info) -> (is_scattered: bool, attenuation: [3]f32, scattered: Ray) {
     switch m in material {
         case Lambertian: {
@@ -192,6 +214,22 @@ scatter :: proc(material: Material, r_in: Ray, hit_info: Hit_Info) -> (is_scatte
             scatter_dir = linalg.normalize(scatter_dir) + (m.fuzz * random_unit_vector())
             _is_scattered := linalg.dot(scatter_dir, hit_info.normal) > 0
             return _is_scattered, m.albedo, Ray{hit_info.p, scatter_dir}
+        }
+        case Dielectric: {
+            attenuation := [3]f32{1,1,1}
+            ri := 1/m.refraction_index if hit_info.front_face else m.refraction_index
+            unit_r_dir := linalg.normalize(r_in.dir)
+            cos_theta := math.min(linalg.dot(-unit_r_dir, hit_info.normal), 1)
+            sin_theta := math.sqrt(1-cos_theta*cos_theta)
+            cannot_refract := ri * sin_theta > 1
+            scattered_dir : [3]f32
+            if cannot_refract || reflectance(cos_theta, ri) > rand.float32() {
+                scattered_dir = reflect(unit_r_dir, hit_info.normal)
+            }
+            else {
+                scattered_dir = refract(unit_r_dir, hit_info.normal, ri)
+            }
+            return true, attenuation, Ray{hit_info.p, scattered_dir}
         }
         case: { return false, {}, {} }
     }
